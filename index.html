@@ -70,7 +70,7 @@
   #eq {
     position: relative; width: 100%; height: 46px; margin-top: 18px;
     font-size: 24px; white-space: pre; letter-spacing: .01em;
-    --anchor: 160px;
+    --anchor: 135px;
   }
   #eq > span { position: absolute; top: 0; line-height: 46px; }
   #lhs { right: calc(50% + var(--anchor)); text-align: right; }
@@ -78,8 +78,9 @@
   @media (max-width: 700px) { #eq { font-size: 18px; --anchor: 120px; } }
   #eq .t { opacity: 0; animation: fade 130ms ease forwards; }
   @keyframes fade { to { opacity: 1; } }
-  #eq .vec { font-weight: 700; font-style: italic; }
-  #eq sub { font-size: .6em; font-weight: 400; font-style: normal; vertical-align: -.25em; }
+  #eq .vec { font-style: italic; }
+  #eq sub { font-size: .62em; font-style: normal; vertical-align: -.25em; }
+  #eq sub i { font-style: italic; }
 
   .flyer {
     position: fixed; z-index: 30; pointer-events: none;
@@ -220,9 +221,9 @@ async function slideTo(i, j) {
 async function dotProduct(i, j) {
   cellsC[i][j].classList.add('target');
   eq.innerHTML =
-    '<span id="lhs" class="t"><span class="vec">r</span><sub>' + (i + 1) + '</sub>' +
+    '<span id="lhs" class="t"><span class="vec">a</span><sub>' + (i + 1) + ',<i>i</i></sub>' +
     ' &middot; ' +
-    '<span class="vec">c</span><sub>' + (j + 1) + '</sub></span>' +
+    '<span class="vec">b</span><sub><i>i</i>,' + (j + 1) + '</sub></span>' +
     '<span id="rhs"><span class="t"> = </span></span>';
   const rhs = $('rhs');
 
