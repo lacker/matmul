@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Matrix Multiplication</title>
+<style>
+  :root { --ink: #000; --faint: #c9c9c9; --glow: #ececec; --c: 50px; }
+  @media (max-width: 1020px) { :root { --c: 42px; } }
+  @media (max-width: 860px)  { :root { --c: 34px; } }
+  @media (max-width: 700px)  { :root { --c: 28px; } }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 40px 20px 40px;
+    background: #fff;
+    color: var(--ink);
+    font-family: "Latin Modern Roman", "Computer Modern Serif", Cambria, "Times New Roman", Times, serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    min-height: 100vh;
+  }
+
+  /* ---------- matrices ---------- */
+  .row { display: flex; align-items: center; justify-content: center; gap: 14px; }
+  .op { font-size: 30px; line-height: 1; padding: 0 4px; }
+
+  .matrix { position: relative; padding: 10px calc(var(--c) * .8); }
+  .matrix::before, .matrix::after {
+    content: ''; position: absolute; top: 0; bottom: 0; width: calc(var(--c) * .26);
+    border: 1.6px solid var(--ink);
+  }
+  .matrix::before { left: 0; border-right: none; }
+  .matrix::after  { right: 0; border-left: none; }
+  .cells { display: grid; grid-template-columns: repeat(4, var(--c)); gap: calc(var(--c) * .16); }
+  /* B gets wider gutters between columns, so the travelling row of A has room to stand in them */
+  #mB { column-gap: calc(var(--c) * .78); }
+  .matrix.wide { padding: 10px calc(var(--c) * 1.15); }
+
+  .cell {
+    width: var(--c); height: var(--c);
+    display: flex; align-items: center; justify-content: center;
+    font-size: calc(var(--c) * .52); font-variant-numeric: lining-nums tabular-nums;
+    position: relative;
+    transition: color 300ms ease;
+  }
+  .cell.lifted { color: var(--faint); }
+  .cell.blank { color: transparent; }
+  .cell.target::after {
+    content: ''; position: absolute; left: 8px; right: 8px; bottom: 8px;
+    border-bottom: 1.5px solid var(--faint);
+  }
+  .cell.pop { animation: pop 420ms ease; }
+  @keyframes pop { 0% { transform: scale(.3); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
+
+  /* ---------- the travelling row of A ---------- */
+  .strip { position: fixed; z-index: 20; pointer-events: none; }
+  .strip .cell { position: absolute; }
+  .strip .cell span { display: block; transition: transform 800ms cubic-bezier(.6,.02,.3,1); }
+
+  .cell.hot {
+    font-weight: 700;
+    background: radial-gradient(circle at 50% 50%, var(--glow) 0 40%, transparent 41%);
+  }
+
+  /* ---------- equation ---------- */
+  /* the equation is anchored on its first "=", which never moves */
+  #eq {
+    position: relative; width: 100%; height: 46px; margin-top: 18px;
+    font-size: 24px; white-space: pre; letter-spacing: .01em;
+    --anchor: 160px;
+  }
+  #eq > span { position: absolute; top: 0; line-height: 46px; }
+  #lhs { right: calc(50% + var(--anchor)); text-align: right; }
+  #rhs { left: calc(50% - var(--anchor)); }
+  @media (max-width: 700px) { #eq { font-size: 18px; --anchor: 120px; } }
+  #eq .t { opacity: 0; animation: fade 130ms ease forwards; }
+  @keyframes fade { to { opacity: 1; } }
+  #eq .vec { font-weight: 700; font-style: italic; }
+  #eq sub { font-size: .6em; font-weight: 400; font-style: normal; vertical-align: -.25em; }
+
+  .flyer {
+    position: fixed; z-index: 30; pointer-events: none;
+    font-family: inherit; font-size: calc(var(--c) * .52);
+    width: var(--c); height: var(--c);
+    display: flex; align-items: center; justify-content: center;
+  }
+
+</style>
+</head>
+<body>
+
+<div class="row">
+  <div class="matrix"><div class="cells" id="mA"></div></div>
+  <div class="op">&middot;</div>
+  <div class="matrix wide"><div class="cells" id="mB"></div></div>
+  <div class="op">=</div>
+  <div class="matrix"><div class="cells" id="mC"></div></div>
+</div>
+
+<div id="eq"></div>
+
+<script>
+const N = 4;
+
+let A = [], B = [], C = [];
+let cellsA = [], cellsB = [], cellsC = [];
+let strip = null;          // the lifted+rotated row of A currently in flight
+let stripRow = -1;
+let rowBox = null;
+
+const $ = id => document.getElementById(id);
+const eq = $('eq');
+
+/* ---------------- setup ---------------- */
+
+const randMatrix = () =>
+  Array.from({length: N}, () => Array.from({length: N}, () => Math.floor(Math.random() * 10)));
+
+function buildMatrix(host, values, blank) {
+  host.innerHTML = '';
+  const cells = [];
+  for (let i = 0; i < N; i++) {
+    cells.push([]);
+    for (let j = 0; j < N; j++) {
+      const d = document.createElement('div');
+      d.className = 'cell' + (blank ? ' blank' : '');
+      d.textContent = blank ? '' : values[i][j];
+      host.appendChild(d);
+      cells[i].push(d);
+    }
+  }
+  return cells;
+}
+
+function reset() {
+  stripRow = -1;
+  strip = null;
+  A = randMatrix();
+  B = randMatrix();
+  C = Array.from({length: N}, () => Array(N).fill(null));
+  cellsA = buildMatrix($('mA'), A, false);
+  cellsB = buildMatrix($('mB'), B, false);
+  cellsC = buildMatrix($('mC'), C, true);
+  document.querySelectorAll('.strip, .flyer').forEach(n => n.remove());
+  eq.innerHTML = '';
+}
+
+/* ---------------- timing ---------------- */
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const dur = ms => ms + 'ms';
+
+/* ---------------- geometry ---------------- */
+
+const centerOf = el => {
+  const r = el.getBoundingClientRect();
+  return {x: r.left + r.width / 2, y: r.top + r.height / 2};
+};
+
+function boxOf(a, b) {
+  const r1 = a.getBoundingClientRect(), r2 = b.getBoundingClientRect();
+  return {
+    left: Math.min(r1.left, r2.left), top: Math.min(r1.top, r2.top),
+    width: Math.max(r1.right, r2.right) - Math.min(r1.left, r2.left),
+    height: Math.max(r1.bottom, r2.bottom) - Math.min(r1.top, r2.top)
+  };
+}
+
+function place(dx, dy, rotate) {
+  strip.el.style.transform = `translate(${dx}px, ${dy}px)` + (rotate ? ' rotate(90deg)' : '');
+  strip.kids.forEach(k => k.querySelector('span').style.transform = rotate ? 'rotate(-90deg)' : '');
+}
+
+/* ---------------- animation ---------------- */
+
+async function liftRow(i) {
+  rowBox = boxOf(cellsA[i][0], cellsA[i][N - 1]);
+  const pitch = cellsA[i][1].getBoundingClientRect().left - cellsA[i][0].getBoundingClientRect().left;
+
+  const el = document.createElement('div');
+  el.className = 'strip';
+  Object.assign(el.style, {
+    left: rowBox.left + 'px', top: rowBox.top + 'px',
+    width: rowBox.width + 'px', height: rowBox.height + 'px',
+    transition: 'transform ' + dur(560) + ' cubic-bezier(.6,.02,.3,1), opacity 260ms ease'
+  });
+  const kids = A[i].map((v, k) => {
+    const d = document.createElement('div');
+    d.className = 'cell';
+    d.style.left = (k * pitch) + 'px';
+    d.style.top = '0px';
+    d.innerHTML = '<span>' + v + '</span>';
+    el.appendChild(d);
+    return d;
+  });
+  document.body.appendChild(el);
+  strip = {el, kids};
+  stripRow = i;
+  A[i].forEach((_, k) => cellsA[i][k].classList.add('lifted'));
+
+  await sleep(160);
+  place(0, 0, true);            // rotate to vertical, still over A
+  await sleep(600);
+}
+
+async function slideTo(i, j) {
+  // park in the gutter immediately left of column j of B
+  const colTop = centerOf(cellsB[0][j]), colBot = centerOf(cellsB[N - 1][j]);
+  const pitchX = centerOf(cellsB[0][1]).x - centerOf(cellsB[0][0]).x;
+  // sit close to column j, not halfway across the gutter — the pairing has to read unambiguously
+  const target = {x: colTop.x - pitchX * 0.34, y: (colTop.y + colBot.y) / 2};
+  place(target.x - (rowBox.left + rowBox.width / 2),
+        target.y - (rowBox.top + rowBox.height / 2), true);
+  await sleep(j === 0 ? 600 : 460);
+}
+
+async function dotProduct(i, j) {
+  cellsC[i][j].classList.add('target');
+  eq.innerHTML =
+    '<span id="lhs" class="t"><span class="vec">r</span><sub>' + (i + 1) + '</sub>' +
+    ' &middot; ' +
+    '<span class="vec">c</span><sub>' + (j + 1) + '</sub></span>' +
+    '<span id="rhs"><span class="t"> = </span></span>';
+  const rhs = $('rhs');
+
+  let total = 0;
+  for (let k = 0; k < N; k++) {
+    const a = A[i][k], b = B[k][j];
+    total += a * b;
+    strip.kids[k].classList.add('hot');
+    cellsB[k][j].classList.add('hot');
+    const t = document.createElement('span');
+    t.className = 't';
+    t.innerHTML = (k ? ' + ' : '') + a + ' &middot; ' + b;
+    rhs.appendChild(t);
+    await sleep(165);
+    strip.kids[k].classList.remove('hot');
+    cellsB[k][j].classList.remove('hot');
+    await sleep(45);
+  }
+
+  const tot = document.createElement('span');
+  tot.className = 't';
+  tot.innerHTML = ' = ' + total;
+  rhs.appendChild(tot);
+  await sleep(330);
+
+  // the answer drops into C
+  const from = tot.getBoundingClientRect();
+  const to = cellsC[i][j].getBoundingClientRect();
+  const cs = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--c'));
+  const x0 = from.right - cs, y0 = from.top + from.height / 2 - cs / 2;
+  const flyer = document.createElement('div');
+  flyer.className = 'flyer';
+  flyer.textContent = total;
+  Object.assign(flyer.style, {
+    left: x0 + 'px', top: y0 + 'px',
+    transition: 'transform ' + dur(430) + ' cubic-bezier(.5,0,.2,1)'
+  });
+  document.body.appendChild(flyer);
+  void flyer.offsetWidth;
+  flyer.style.transform = `translate(${to.left - x0}px, ${to.top - y0}px)`;
+  await sleep(450);
+
+  flyer.remove();
+  C[i][j] = total;
+  const cc = cellsC[i][j];
+  cc.textContent = total;
+  cc.classList.remove('blank', 'target');
+  cc.classList.add('pop');
+  setTimeout(() => cc.classList.remove('pop'), 500);
+  await sleep(180);
+}
+
+async function dropRow() {
+  if (!strip) return;
+  strip.el.style.opacity = 0;
+  for (let k = 0; k < N; k++) cellsA[stripRow][k].classList.remove('lifted');
+  const dead = strip.el;
+  strip = null;
+  stripRow = -1;
+  await sleep(260);
+  dead.remove();
+}
+
+/* runs forever: fill in C, admire it, then start over with fresh numbers */
+async function main() {
+  for (;;) {
+    reset();
+    await sleep(700);
+    for (let i = 0; i < N; i++) {
+      await liftRow(i);
+      for (let j = 0; j < N; j++) {
+        await slideTo(i, j);
+        await dotProduct(i, j);
+      }
+      await dropRow();
+    }
+    eq.innerHTML = '';
+    await sleep(2200);
+  }
+}
+
+main();
+</script>
+</body>
+</html>
